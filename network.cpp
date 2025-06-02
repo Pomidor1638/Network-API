@@ -69,6 +69,7 @@ namespace NETWORK_INTERFACE {
 		const int n = static_cast<int>(
 			SDL_ceil(static_cast<double>(data.size) / fragsize)
 	    );
+
 		packets.reserve(n);
 
 		for (int i = 0; i < n; i++) {
@@ -90,7 +91,7 @@ namespace NETWORK_INTERFACE {
 
 			p->header = NET_PACKET_HEADER{ 
 				NET_PACKET_REQUEST_DATA, 
-				n, 
+				i, 
 				bytes_to_copy,
 				{} 
 			};
@@ -108,10 +109,50 @@ namespace NETWORK_INTERFACE {
 		return packets;
 	}
 
-	int raw_sendData(const void* data, size_t size, ipaddress_t address, NET_SOCKET socket) {
+	//  0 - ok
+	// -1 - parameters error
+	// -2 - fragments error
+	// -3 - size error
 
+	int defragmentData(byte** data, size_t size, std::vector<NET_PACKET*>& fragments) {
 		
+		if (!size || !data)
+			return -1;
+
+		size_t total_size = 0;
+		size_t cur_size   = 0;
+
+		for (const auto& x : fragments) {
+			if (!x->data || !x->header.size)
+				return -2;
+
+			total_size += x->header.size;
+		}
+
+		if (size != total_size) {
+			return -3;
+		}
 		
+		*data = new byte[size];
+
+		for (int i = 0; i < fragments.size(); i++) {
+			NET_PACKET* packet = fragments[i];
+			memcpy((*data) + cur_size, packet->data, packet->header.size);
+
+			delete packet;
+
+			cur_size += packet->header.size;
+		}
+
+		return 0;
+	}
+
+	//  0 - Ошибка отправки
+	//  1 - Успешная отправка
+	// -1 - Ошибка параметров
+	// -2 - Ошибка выделения памяти под пакет
+
+	int raw_sendData(const byte* data, size_t size, ipaddress_t address, NET_SOCKET socket) {
 
 		if (size > NET_DEFAULT_PACKET_SIZE)
 			return -2;
@@ -135,7 +176,14 @@ namespace NETWORK_INTERFACE {
 		return status;
 	}
 
-	int raw_recvData(void** data, size_t* size, ipaddress_t* address, NET_SOCKET socket) {
+
+	//  0 - Нет пакетов
+	//  1 - Есть пакеты
+	// -1 - Ошибка параметров
+	// -2 - Ошибка выделения памяти под пакет
+	// -3 - Ошибка выделения памяти для буфера
+
+	int raw_recvData(byte** data, size_t* size, ipaddress_t* address, NET_SOCKET socket) {
 
 		if (!data || !size || !address) {
 			return -1;
@@ -265,8 +313,7 @@ namespace NETWORK_INTERFACE {
 
 		clients.push_back(nclient);
 
-
-		return false;
+		return true;
 	}
 
 	bool NET_SERVER::kick(int clientnum) {
@@ -327,16 +374,15 @@ namespace NETWORK_INTERFACE {
 
 	//  0 - данные не готовы
 	//  1 - данные получены
-	// -1 - данные не готовы
+	// -1 - данные ошибка параметров
 	// -2 - ошибка
-	// -3 - неисправность контекста передачи
 
 	int NET_SERVER::recvData(int clientnum, byte** data, size_t* size) {
 
 		if (clientnum < 0 || clientnum >= clients.size() || 
 			!data || !size
  		) {
-			return -2;
+			return -1;
 		}
 
 		NET_SERVER_CLIENT* client = &clients[clientnum];
@@ -344,35 +390,25 @@ namespace NETWORK_INTERFACE {
 
 		if (
 			context->total_size == context->received_size &&
-			!context->is_busy && !context->fragments_received.size()
+			!context->is_busy 
 		) {
 			// Пока приходится копировать огромные данные, т.к.
 			// (context->data придется использовать потом
 
 			*size = context->total_size;
-			*data = new byte[*size];
 
-			if (!*data) {
+			if (defragmentData(data, context->total_size, context->fragments)) {
 				return -2;
 			}
 
-			memcpy(
-				*data, 
-				context->data,
-				sizeof(*size)
-			);
-
 			context->total_size    = 0;
 			context->received_size = 0;
-			if (!data) 
-				return -3;
-			delete[] context->data;
-			context->data = nullptr;
+			context->is_busy = false;
 			
+			return 1;
 		}
-		else {
-			return -1;
-		}
+		
+		return 0;
 	}
 
 	// -3 - Слишком много клиентов
@@ -386,13 +422,13 @@ namespace NETWORK_INTERFACE {
 		if (clients.size() >= max_clients) {
 
 			header.type = NET_PACKET_RESPONSE_FULL_SERVER;
-			raw_sendData(packet, sizeof(*packet), ip, (UDPsocket)serverSocket);
-			delete[] packet;
+			raw_sendData((byte*)packet, sizeof(*packet), ip, (UDPsocket)serverSocket);
+			delete packet;
 			return -3;
 		}
 
 
-		int status = raw_sendData(packet, sizeof(*packet), ip, (UDPsocket)serverSocket);
+		int status = raw_sendData((byte*)packet, sizeof(*packet), ip, (UDPsocket)serverSocket);
 
 		if (status == 1) {
 			clients.push_back(
@@ -421,7 +457,7 @@ namespace NETWORK_INTERFACE {
 
 		NET_PACKET* packet = new NET_PACKET{ header, {} };
 
-		int status = raw_sendData(packet, sizeof(*packet), ip, (UDPsocket)serverSocket);
+		int status = raw_sendData((byte*)packet, sizeof(*packet), ip, (UDPsocket)serverSocket);
 
 		delete packet;
 
@@ -434,10 +470,15 @@ namespace NETWORK_INTERFACE {
 	}
 
 
-	//  1 - успешное отправка
-	//  0 - ошибка сети
-	// -1 - ошибка создания пакета
-	// -2 - не хватает памяти для пакета
+	int NET_SERVER::getMaxClients() {
+		return max_clients;
+	}
+	int NET_SERVER::getClientsCount() {
+		return clients.size();
+	}
+
+
+	//  -1 - нет клиента
 
 
 	int NET_SERVER::getClientNum(const ipaddress_t& ip) {
@@ -447,8 +488,16 @@ namespace NETWORK_INTERFACE {
 			if (!memcmp(&ip, &client.ip, sizeof(ipaddress_t)))
 				return i;
 		}
-
 		return -1;
+	}
+
+
+	ipaddress_t NET_SERVER::getClientIP(int clientnum) {
+		if (clientnum < 0 || clientnum > clients.size()) {
+			return { INADDR_NONE, 0xFFFF};
+		}
+
+		return clients[clientnum].ip;
 	}
 
 
@@ -457,85 +506,18 @@ namespace NETWORK_INTERFACE {
 	/// Client's Functions
 
 
-	//  1 - успешное получение
-	//  0 - нет данных
-	// -1 - ошибка сети / памяти
-	// -2 - не хватает памяти для пакета
-
-	int NET_CLIENT::connectTo(ipaddress_t address) {
-
-		int status;
-
-		NET_PACKET_HEADER header{ NET_PACKET_REQUEST_CONNECTION, 0, 0, {} };
-		memset(&header.buffer, 0, sizeof(header.buffer));
-		memcpy(&header.buffer, name.c_str(), name.length());
-
-		UDPpacket* packet = SDLNet_AllocPacket(sizeof(NET_PACKET_HEADER));
-
-		if (!packet)
-			return -1;
-
-
-
-		serverIP = address;
-
-		packet->channel = -1;
-		packet->len = sizeof(NET_PACKET_HEADER);
-		packet->maxlen = sizeof(NET_PACKET_HEADER);
-
-		memcpy(packet->data, &header, sizeof(NET_PACKET_HEADER));
-
-		packet->address = *(IPaddress*)&serverIP;
-
-		status = SDLNet_UDP_Send((UDPsocket)socket, -1, packet);
-
-		if (status)
-			this->status = NET_CLIENT_CONNECTING;
-
-		if (packet)
-			SDLNet_FreePacket(packet);
-
-
-		return status;
-	}
-
 	int NET_CLIENT::disconnect() {
 
-		int status;
-
-		NET_PACKET_HEADER header{ NET_PACKET_REQUEST_DISCONNECT, 0, 0, {} };
-		memset(&header.buffer, 0, sizeof(header.buffer));
-
-		UDPpacket* packet = SDLNet_AllocPacket(sizeof(NET_PACKET_HEADER));
-
-		if (!packet)
-			return 0;
-
-		packet->channel = -1;
-		packet->len = sizeof(NET_PACKET_HEADER);
-		packet->maxlen = sizeof(NET_PACKET_HEADER);
-
-		memcpy(packet->data, &header, sizeof(NET_PACKET_HEADER));
-
-		packet->address = *(IPaddress*)&serverIP;
-
-		status = SDLNet_UDP_Send((UDPsocket)socket, -1, packet);
-
-		SDLNet_FreePacket(packet);
-
-		return status;
+		return 0;
 
 	}
-
 
 	ipaddress_t NET_CLIENT::getServerAddress() {
 		return serverIP;
 	}
 
-	NET_CLIENT::NET_CLIENT(std::string name) {
-
+	NET_CLIENT::NET_CLIENT() {
 		socket = (NET_SOCKET)SDLNet_UDP_Open(0);
-		this->name = name;
 	}
 
 	NET_CLIENT::~NET_CLIENT() {

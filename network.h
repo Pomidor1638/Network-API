@@ -51,8 +51,6 @@ namespace NETWORK_INTERFACE {
 		NET_PACKET_REQUEST_DATA,
 		NET_PACKET_REQUEST_STATUS,
 
-
-
 		NET_PACKET_RESPONSE_CONNECTION,
 		NET_PACKET_RESPONSE_DISCONNECT,
 		NET_PACKET_RESPONSE_FULL_SERVER,
@@ -62,23 +60,6 @@ namespace NETWORK_INTERFACE {
 
 	};
 
-	struct NET_PACKET_HEADER {
-
-		NET_PACKET_TYPE type = NET_PACKET_UNDEFINED;
-
-		int packetCount    = 0;
-		size_t packet_size = 0;
-
-		byte buffer[NET_MAX_BUFFER_SIZE] = {};
-
-	};
-
-	struct NET_PACKET {
-		NET_PACKET_HEADER header;
-		byte data[NET_MAX_PACKET_SIZE];
-	};
-
-	
 	bool InitAPI();
 	bool QuitAPI();
 
@@ -90,28 +71,39 @@ namespace NETWORK_INTERFACE {
 		byte* data;
 	};
 
+	struct NET_PACKET_HEADER {
+
+		NET_PACKET_TYPE type = NET_PACKET_UNDEFINED;
+
+		int packetnum = 0;
+		size_t size = 0;
+		
+		char buffer[NET_MAX_BUFFER_SIZE] = {};
+	};
+
+	struct NET_PACKET {
+		NET_PACKET_HEADER header;
+		byte data[NET_MAX_PACKET_SIZE];
+	};
+
 	// Информация о состоянии передачи информации
 	struct NET_TRANSFER_CONTEXT {
-		byte* data = nullptr;
-
-		size_t total_size = 0;
-		size_t received_size = 0;
-
-		std::vector<bool> fragments_received{};
-		std::vector<NET_PACKET*> ack_queue{};
 
 		clock_t last_activity = 0;
 
 		bool is_busy = false;
+
+		size_t total_size    = 0;
+		size_t received_size = 0;
+
 		std::queue<NET_DATA> query{};
+		std::vector<NET_PACKET*> fragments{};
 	};
 
-	
-
-
 	std::vector<NET_PACKET*> fragmentData(NET_DATA data, int* status, size_t fragsize);
-	int raw_recvData(      void** data, size_t* size, ipaddress_t* address, NET_SOCKET socket);
-	int raw_sendData(const void*  data, size_t  size, ipaddress_t  address, NET_SOCKET socket);
+	int defragmentData(byte** data, size_t* size, std::vector<NET_PACKET*>& fragments);
+	int raw_recvData(      byte** data, size_t* size, ipaddress_t* address, NET_SOCKET socket);
+	int raw_sendData(const byte*  data, size_t  size, ipaddress_t  address, NET_SOCKET socket);
 
 
 	class NET_SERVER {
@@ -149,10 +141,9 @@ namespace NETWORK_INTERFACE {
 
 	public:
 
-		NET_SERVER() = default;
 		virtual ~NET_SERVER();
 
-		NET_SERVER(const NET_SERVER& other) = default;
+		NET_SERVER(const NET_SERVER& other) = delete;
 		NET_SERVER(uint16_t port, int maxclients);
 		
 		// Start and Stop
@@ -210,8 +201,8 @@ namespace NETWORK_INTERFACE {
 		int recvData(      void** data, size_t* size, ipaddress_t* address = nullptr);      // Если address = nullptr, то все пакеты входящие не от сервера игнорируются 
 		int sendData(const void*  data, size_t  size, ipaddress_t* address = nullptr);  // Если address = nullptr, то данные отправляются на serverIP
 
-		NET_CLIENT(std::string name);
-		NET_CLIENT() = default;
+		NET_CLIENT();
+		NET_CLIENT(const NET_CLIENT&) = delete;
 		virtual ~NET_CLIENT();
 		
 		int tick();
