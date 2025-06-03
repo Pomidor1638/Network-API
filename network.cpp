@@ -144,6 +144,8 @@ namespace NETWORK_INTERFACE {
 			cur_size += packet->header.size;
 		}
 
+		fragments.resize(0);
+
 		return 0;
 	}
 
@@ -404,6 +406,8 @@ namespace NETWORK_INTERFACE {
 			context->total_size    = 0;
 			context->received_size = 0;
 			context->is_busy = false;
+			context->type = NET_PACKET_UNDEFINED;
+
 			
 			return 1;
 		}
@@ -505,11 +509,35 @@ namespace NETWORK_INTERFACE {
 
 	/// Client's Functions
 
+	int NET_CLIENT::connectTo(ipaddress_t address) {
+
+		NET_PACKET_HEADER header{ NET_PACKET_REQUEST_CONNECTION, 0, 0, {} };
+		memset(&header.buffer, 0, sizeof(header.buffer));
+		NET_PACKET* packet = new NET_PACKET{ header, {} };
+
+
+		int status = raw_sendData((byte*)packet, sizeof(*packet), address, (UDPsocket)socket);
+		
+		serverIP = address;
+
+		delete packet;
+
+		return status;
+	}
 
 	int NET_CLIENT::disconnect() {
 
-		return 0;
+		
+		NET_PACKET_HEADER header{ NET_PACKET_REQUEST_DISCONNECT, 0, 0, {} };
+		memset(&header.buffer, 0, sizeof(header.buffer));
 
+		NET_PACKET* packet = new NET_PACKET{ header, {} };
+
+		int status = raw_sendData((byte*)packet, sizeof(*packet), serverIP, (UDPsocket)socket);
+
+		delete packet;
+
+		return status;
 	}
 
 	ipaddress_t NET_CLIENT::getServerAddress() {
