@@ -22,31 +22,53 @@ namespace NETWORK_INTERFACE {
 	}
 
 	void NET_SERVER::tick_handle_client_data(int clientnum, NET_PACKET* packet) {
-		NET_TRANSFER_CONTEXT& incoming = clients[clientnum].incoming;
+		NET_SERVER_CLIENT& client = clients[clientnum];
+		NET_TRANSFER_CONTEXT& incoming = client.incoming;
 		int packet_num = packet->header.packetnum;
 
 		if (packet_num < 0 || packet_num >= static_cast<int>(incoming.fragments.size())) {
 			printf("Error handle_client_data(): packet_num == %i\n", packet_num);
+			exit(1);
 			return;
 		}
 
 		if (!incoming.is_busy) {
 			printf("Warning: handle_client_data(): received fragment while not busy\n");
+			exit(1);
 			return;
 		}
-		Ö
-		switch (packet->header.type) {
-		case NET_PACKET_RESPONSE_DATA:
-			if (incoming.fragments[packet_num] == nullptr) {
-				incoming.fragments[packet_num] = packet;
-				packet = nullptr;
+		
+
+		switch (incoming.type) {
+		case NET_PACKET_UNDEFINED: {
+			NET_PACKET_TYPE type = packet->header.type;
+			if (	
+				type <= NET_PACKET_REQUEST_STATUS and
+				type >= NET_PACKET_REQUEST_CONNECTION
+			) {
+				incoming.is_busy = true;
+				incoming.last_activity = client.last_heartbeat;
+
+			}
+			break;
+		}
+		case NET_PACKET_REQUEST_DATA:
+			switch (packet->header.type) {
+			case NET_PACKET_RESPONSE_DATA:
+				
+				break;
+
+			default:
+				break;
 			}
 			break;
 
 		default:
-			printf("Warning: handle_client_data(): unknown or unhandled packet type %d\n", static_cast<int>(packet->header.type));
-			break;
+			printf("Error tick_handle_client_data:\nincoming.type == %i\n", incoming.type);
+			exit(1);
+			return;
 		}
+
 	}
 
 

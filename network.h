@@ -86,41 +86,45 @@ namespace NETWORK_INTERFACE {
 		byte data[NET_MAX_PACKET_SIZE];
 	};
 
-	// Информация о состоянии передачи информации
 	struct NET_TRANSFER_CONTEXT {
 
-		clock_t last_activity = 0;
+		clock_t last_activity = 0; // for ping and responding
 
-		bool is_busy = false;
+		bool is_busy = false; // for recieving
 
-		size_t total_size    = 0;
+		size_t total_size    = 0; 
 		size_t received_size = 0;
 
-		std::queue<NET_DATA> query{};
-		std::vector<NET_PACKET*> fragments{};
+		NET_PACKET_TYPE type = NET_PACKET_UNDEFINED;
+
+		std::vector<NET_PACKET*> fragments{}; // fragmenting
 	};
 
 	std::vector<NET_PACKET*> fragmentData(NET_DATA data, int* status, size_t fragsize);
-	int defragmentData(byte** data, size_t* size, std::vector<NET_PACKET*>& fragments);
+	int defragmentData(byte** data, size_t size, std::vector<NET_PACKET*>& fragments);
+	
 	int raw_recvData(      byte** data, size_t* size, ipaddress_t* address, NET_SOCKET socket);
 	int raw_sendData(const byte*  data, size_t  size, ipaddress_t  address, NET_SOCKET socket);
-
+	
+	
 
 	class NET_SERVER {
 	protected:
-
 		struct NET_SERVER_CLIENT {
+
 			ipaddress_t ip;
-			int priority = 1;
+			
 			NET_CLIENT_STATUS status = NET_CLIENT_DISCONNECTED;
 
 			// Два независимых контекста
 			NET_TRANSFER_CONTEXT incoming;
 			NET_TRANSFER_CONTEXT outgoing;
 
-			// Тайминги
+			// for sending
 			clock_t last_heartbeat = 0;
 			uint32_t current_tick  = 0;
+
+			std::queue<NET_DATA> query{}; 
 		};
 
 
@@ -138,6 +142,12 @@ namespace NETWORK_INTERFACE {
 		int sendConnect(ipaddress_t ip);
 		int sendDisconnect(int clientnum);
 		bool raw_addClient(const NET_SERVER_CLIENT& nclient, int* clientnum);
+		
+	private:
+		int  tick_incoming();
+		int  tick_outgoing(int clientnum);
+		int  tick_process_client_packet(const ipaddress_t& ip, NET_PACKET* packet);
+		void tick_handle_client_data(int clientnum, NET_PACKET* packet);
 
 	public:
 
