@@ -358,7 +358,7 @@ namespace NETWORK_INTERFACE {
 
 		NET_TRANSFER_CONTEXT* context = &client->incoming;
 
-		if (context->query.size() >= NET_MAX_DATA_QUERY_SIZE)
+		if (client->query.size() >= NET_MAX_DATA_QUERY_SIZE)
 			return -5;
 
 		byte* ndata = new byte[size];
@@ -369,7 +369,7 @@ namespace NETWORK_INTERFACE {
 			size
 		);
 
-		context->query.push(NET_DATA{ size, ndata });
+		client->query.push(NET_DATA{ size, ndata });
 
 		return 0;
 	}
@@ -438,7 +438,6 @@ namespace NETWORK_INTERFACE {
 			clients.push_back(
 				NET_SERVER_CLIENT {
 					ip,                   // address
-					1,                    // priority
 					NET_CLIENT_CONNECTED, // status 
 					{},                   // transfer incoming                   
 					{},                   // transfer outcoming                   

@@ -48,7 +48,9 @@ namespace NETWORK_INTERFACE {
 			) {
 				incoming.is_busy = true;
 				incoming.last_activity = client.last_heartbeat;
-
+				incoming.received_size = 0;
+				incoming.total_size = packet->header.size;
+				incoming.type = type;
 			}
 			break;
 		}
