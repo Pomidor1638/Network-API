@@ -58,6 +58,9 @@ namespace NETWORK_INTERFACE {
 		NET_PACKET_RESPONSE_STATUS,
 		NET_PACKET_RESPONSE_DATA,
 
+		NET_PACKET_MESSAGE_UNEXCEPTED,
+		NET_PACKET_MESSAGE_UNSUPPORTED,
+
 	};
 
 	bool InitAPI();
@@ -98,6 +101,9 @@ namespace NETWORK_INTERFACE {
 		NET_PACKET_TYPE type = NET_PACKET_UNDEFINED;
 
 		std::vector<NET_PACKET*> fragments{}; // fragmenting
+
+
+		std::queue<NET_DATA> query{}; // for sendeing/recieving
 	};
 
 	std::vector<NET_PACKET*> fragmentData(NET_DATA data, int* status, size_t fragsize);
@@ -123,8 +129,6 @@ namespace NETWORK_INTERFACE {
 			// for sending
 			clock_t last_heartbeat = 0;
 			uint32_t current_tick  = 0;
-
-			std::queue<NET_DATA> query{}; 
 		};
 
 
@@ -140,7 +144,11 @@ namespace NETWORK_INTERFACE {
 		clock_t lastTick = 0;
 
 		int sendConnect(ipaddress_t ip);
-		int sendDisconnect(int clientnum);
+		int sendDisconnect(int clientnum, bool request = true);
+		int sendUnExcepted(NET_SERVER_CLIENT* client);
+		
+		NET_DATA makeStatus();
+
 		bool raw_addClient(const NET_SERVER_CLIENT& nclient, int* clientnum);
 		
 	private:

@@ -10,7 +10,7 @@ namespace NETWORK_INTERFACE {
 			if (packet->header.type == NET_PACKET_REQUEST_CONNECTION) {
 				int s = sendConnect(ip);
 				if (s != 1) {
-					printf("Error process_client_packet(): sendConnect(ip) == %i\n", s);
+					printf("Error process_client_packet():\nsendConnect(ip) == %i\n", s);
 					return -2;
 				}
 			}
@@ -24,43 +24,109 @@ namespace NETWORK_INTERFACE {
 	void NET_SERVER::tick_handle_client_data(int clientnum, NET_PACKET* packet) {
 		NET_SERVER_CLIENT& client = clients[clientnum];
 		NET_TRANSFER_CONTEXT& incoming = client.incoming;
+		NET_TRANSFER_CONTEXT& outgoing = client.outgoing;
 		int packet_num = packet->header.packetnum;
 
 		if (packet_num < 0 || packet_num >= static_cast<int>(incoming.fragments.size())) {
-			printf("Error handle_client_data(): packet_num == %i\n", packet_num);
+			printf("Error handle_client_data():\npacket_num == %i\n", packet_num);
 			exit(1);
 			return;
 		}
 
 		if (!incoming.is_busy) {
-			printf("Warning: handle_client_data(): received fragment while not busy\n");
+			printf("Warning: handle_client_data():\nreceived packet while not busy\n");
 			exit(1);
 			return;
 		}
 		
+		if (packet->header.type == NET_PACKET_MESSAGE_UNEXCEPTED) {
+			incoming.is_busy = false;
+			for (const auto& x : incoming.fragments) {
+				if (x)
+					delete x;
+			}
+			incoming.last_activity = client.last_heartbeat;
+			incoming.received_size = 0;
+			incoming.total_size = 0;
+			incoming.type = NET_PACKET_UNDEFINED;
+		}
 
 		switch (incoming.type) {
 		case NET_PACKET_UNDEFINED: {
 			NET_PACKET_TYPE type = packet->header.type;
-			if (	
-				type <= NET_PACKET_REQUEST_STATUS and
-				type >= NET_PACKET_REQUEST_CONNECTION
-			) {
+			switch (type) {
+			case NET_PACKET_REQUEST_DATA:
 				incoming.is_busy = true;
 				incoming.last_activity = client.last_heartbeat;
 				incoming.received_size = 0;
 				incoming.total_size = packet->header.size;
-				incoming.type = type;
+				incoming.type = NET_PACKET_REQUEST_DATA;
+				for (const auto& x : incoming.fragments) {
+					if (x)
+						delete x;
+				}
+
+				incoming.fragments.resize(packet_num);
+				for (auto& x : incoming.fragments) {
+					x = nullptr;
+				}
+
+
+				break;
+			case NET_PACKET_REQUEST_DISCONNECT:
+				sendDisconnect(clientnum, false);
+				break;
+			case NET_PACKET_REQUEST_STATUS: {
+				NET_DATA d = makeStatus();
+				if (!d.size || !d.data) {
+					printf("Error tick_handle_client_data:\n");
+					printf("makeStatus() can\'t allocate status\n");
+					exit(1);
+				}
+				outgoing.query.push(d);
+			}
+				break;
+			default:
+				sendUnExcepted(&client);
+				break;
 			}
 			break;
 		}
 		case NET_PACKET_REQUEST_DATA:
 			switch (packet->header.type) {
 			case NET_PACKET_RESPONSE_DATA:
+				NET_PACKET*& fragment = incoming.fragments[packet_num];
+				if (fragment) {
+					fragment = packet;
+				}
+
+				incoming.last_activity = client.last_heartbeat;
+				incoming.received_size += fragment->header.size;
 				
+				if (incoming.received_size == incoming.total_size) {
+					NET_DATA data{incoming.total_size, nullptr};
+					int def_status = defragmentData(
+						&data.data,
+						data.size,
+						incoming.fragments
+					);
+
+					if (def_status) {
+						// There is must be some shit to
+						// tell client that fragments corrupted
+						// but now I fuck it
+						printf("Error ")
+					}
+
+
+
+				}
+
+
 				break;
 
 			default:
+				sendUnExcepted(&client);
 				break;
 			}
 			break;

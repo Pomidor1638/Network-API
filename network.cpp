@@ -125,7 +125,6 @@ namespace NETWORK_INTERFACE {
 		for (const auto& x : fragments) {
 			if (!x->data || !x->header.size)
 				return -2;
-
 			total_size += x->header.size;
 		}
 
@@ -356,9 +355,9 @@ namespace NETWORK_INTERFACE {
 			return -3;
 		}
 
-		NET_TRANSFER_CONTEXT* context = &client->incoming;
+		NET_TRANSFER_CONTEXT* context = &client->outgoing;
 
-		if (client->query.size() >= NET_MAX_DATA_QUERY_SIZE)
+		if (context->query.size() >= NET_MAX_DATA_QUERY_SIZE)
 			return -5;
 
 		byte* ndata = new byte[size];
@@ -369,7 +368,7 @@ namespace NETWORK_INTERFACE {
 			size
 		);
 
-		client->query.push(NET_DATA{ size, ndata });
+		context->query.push(NET_DATA{ size, ndata });
 
 		return 0;
 	}
@@ -378,8 +377,13 @@ namespace NETWORK_INTERFACE {
 	//  1 - данные получены
 	// -1 - данные ошибка параметров
 	// -2 - ошибка
+	// -3 - сервер мертв
 
 	int NET_SERVER::recvData(int clientnum, byte** data, size_t* size) {
+
+		if (status != NET_SERVER_STATUS_ALIVE) {
+			return -3;
+		}
 
 		if (clientnum < 0 || clientnum >= clients.size() || 
 			!data || !size
@@ -390,29 +394,11 @@ namespace NETWORK_INTERFACE {
 		NET_SERVER_CLIENT* client = &clients[clientnum];
 		NET_TRANSFER_CONTEXT* context = &client->incoming;
 
-		if (
-			context->total_size == context->received_size &&
-			!context->is_busy 
-		) {
-			// ѕока приходитс€ копировать огромные данные, т.к.
-			// (context->data придетс€ использовать потом
-
-			*size = context->total_size;
-
-			if (defragmentData(data, context->total_size, context->fragments)) {
-				return -2;
-			}
-
-			context->total_size    = 0;
-			context->received_size = 0;
-			context->is_busy = false;
-			context->type = NET_PACKET_UNDEFINED;
-
-			
-			return 1;
-		}
+		if (context->query.empty())
+			return 0;
 		
-		return 0;
+		NET_DATA data = context->query.back();
+		return 1;
 	}
 
 	// -3 - —лишком много клиентов
@@ -453,9 +439,12 @@ namespace NETWORK_INTERFACE {
 		return status;
 	}
 
-	int NET_SERVER::sendDisconnect(int clientnum) {
+	int NET_SERVER::sendDisconnect(int clientnum, bool request) {
 
-		NET_PACKET_HEADER header{ NET_PACKET_REQUEST_DISCONNECT, 0, 0, {} };
+		NET_PACKET_HEADER header{ request ? 
+			NET_PACKET_REQUEST_DISCONNECT : 
+			NET_PACKET_RESPONSE_DISCONNECT
+			, 0, 0, {} };
 		memset(&header.buffer, 0, sizeof(header.buffer));
 
 		NET_PACKET* packet = new NET_PACKET{ header, {} };
@@ -466,6 +455,38 @@ namespace NETWORK_INTERFACE {
 
 		return status;
 
+	}
+
+
+	int NET_SERVER::sendUnExcepted(NET_SERVER_CLIENT* client) {
+
+
+		NET_TRANSFER_CONTEXT* c = &client->outgoing;
+
+		for (const auto& x : c->fragments) {
+			if (x)
+				delete x;
+		}
+		
+		c->fragments.resize(0);
+		c->is_busy = false;
+		c->last_activity = client->last_heartbeat;
+		c->received_size = 0;
+		c->total_size = 0;
+		c->type = NET_PACKET_UNDEFINED;
+
+		NET_PACKET_HEADER header{ 
+			NET_PACKET_MESSAGE_UNEXCEPTED
+			, 0, 0, {} 
+		};
+
+		memset(&header.buffer, 0, sizeof(header.buffer));
+
+		NET_PACKET* packet = new NET_PACKET{ header, {} };
+
+		int status = raw_sendData((byte*)packet, sizeof(*packet), ip, (UDPsocket)serverSocket);
+		delete packet;
+		return status;
 	}
 
 	ipaddress_t NET_SERVER::getServerIP() {
@@ -480,6 +501,57 @@ namespace NETWORK_INTERFACE {
 		return clients.size();
 	}
 
+
+	NET_DATA NET_SERVER::makeStatus() {
+		
+
+		NET_DATA d{ 0, nullptr };
+
+		struct {
+			NET_SERVER_STATUS status;
+			int max_clients;
+			clock_t lastTick;
+		} header;
+
+		struct {
+			ipaddress_t ip;
+			NET_CLIENT_STATUS status;
+			clock_t ping;
+		} lump;
+
+		clock_t cur_clock = clock();
+
+
+		size_t cur_size = sizeof(header);
+		d.size = sizeof(header) + clients.size() * sizeof(lump);
+		d.data = new byte[d.size];
+
+		if (!d.data) {
+			d.size = 0;
+			return d;
+		}
+
+		memcpy(d.data, &header, sizeof(header));
+
+		for (const auto& x : clients) {
+
+			if (cur_size >= d.size) {
+				d.size = 0;
+				delete[] d.data;
+				d.data = nullptr;
+				break;
+			}
+
+			lump.ip = x.ip;
+			lump.ping = cur_clock - x.last_heartbeat;
+			lump.status = x.status;
+
+			memcpy(d.data + cur_size, &lump, sizeof(lump));
+			cur_size += sizeof(lump);
+		}
+
+		return d;
+	}
 
 	//  -1 - нет клиента
 
@@ -526,7 +598,6 @@ namespace NETWORK_INTERFACE {
 
 	int NET_CLIENT::disconnect() {
 
-		
 		NET_PACKET_HEADER header{ NET_PACKET_REQUEST_DISCONNECT, 0, 0, {} };
 		memset(&header.buffer, 0, sizeof(header.buffer));
 
